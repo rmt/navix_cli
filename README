@@ -1,0 +1,38 @@
+==========
+Navi-X CLI
+==========
+
+Navi-X CLI is an easy way to navigate the user feeds of the Navi-X media
+browser.  It implements a NIPL parser to work out the final download URLs
+when they're obfuscated.
+
+Commands
+--------
+
+``ls``
+  list the current playlist
+
+``cd <num>``
+  change to the playlist represented by this number
+
+``cd ..``
+  change to the parent playlist (or exit if at main menu)
+
+Control-D
+  change to parent playlist (Linux & UNIX) or exit if at main menu
+
+``show <num>``
+  show more information about number
+
+``get <num>``
+  download the file 
+
+``more <num>``
+  read the contents of the given URL with "more"
+
+
+Known Bugs
+----------
+There are a few, but basic usage works fine.  Patches and bug reports
+are welcome.
+
