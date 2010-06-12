@@ -15,7 +15,14 @@ import textwrap
 #
 import scraper
 
-DOWNLOADDIR = os.path.join(os.environ['HOME'], 'Download')
+DOWNLOADPATH = os.path.join(os.environ['HOME'], 'Download')
+if not os.path.exists(DOWNLOADPATH):
+    DOWNLOADPATH = os.path.join(os.environ['HOME'], 'Downloads')
+if not os.path.exists(DOWNLOADPATH):
+    DOWNLOADPATH = os.path.join(os.environ['HOME'])
+PAGER_CMD = ["less", "-eFX"]
+
+exit_until_index = False # set to true in a cmd and keep returning until we're at the idx again
 
 class myURLOpener(urllib.FancyURLopener):
     def http_error_206(self, url, fp, errcode, errmsg, headers, data=None):
@@ -185,6 +192,15 @@ class BaseCmd(cmd.Cmd):
     def do_EOF(self, line=None):
         print ""
         return True
+    def postcmd(self, stop, line):
+        global exit_until_index
+        if exit_until_index:
+            if hasattr(self, '__isindex'):
+                exit_until_index = False
+                return False
+            else:
+                return True
+        return stop
     def emptyline(self):
         pass
 
@@ -218,7 +234,7 @@ class PlaylistCmd(BaseCmd):
         line = line.strip()
         i = -1
         types = { 'playlist' : 'pls', 'vid' : 'vid' }
-        pipe = Popen(["more"], stdin=PIPE)
+        pipe = Popen(PAGER_CMD, stdin=PIPE)
         for x in self.playlist:
             i += 1
             name = re.sub('\[\/?COLOR.*?\]','', x['name'])
@@ -232,6 +248,10 @@ class PlaylistCmd(BaseCmd):
     def do_cd(self, line):
         if line == "..":
             return True
+        if line == "/":
+            global exit_until_index
+            exit_until_index = True
+            return True
         d = self._getd(line)
         if d is None:
             print "!! Cannot cd to %s" % line
@@ -244,13 +264,16 @@ class PlaylistCmd(BaseCmd):
             print "!! Cannot cd to %s" % line
     def do_more(self, line):
         d = self._getd(line)
+        if d is None:
+            print "!! Cannot more %s" % line
+            return
         if 'URL' in d and 'type' in d:
             if d['type'] in ('video', 'audio'):
                 print "!! Cannot view binary data as a text file"
                 return
             req = request(d['URL'])
             g = urllib2.urlopen(req)
-            pipe = Popen(["more"], stdin=PIPE)
+            pipe = Popen(PAGER_CMD, stdin=PIPE)
             while True:
                 b = g.read(512)
                 if not b:
@@ -285,6 +308,9 @@ class PlaylistCmd(BaseCmd):
 
     def do_proc(self, line):
         d = self._getd(line)
+        if d is None:
+            print "!! Error calling proc with argument: %s" % line
+            return
         if 'processor' in d:
             purl = "%s?url=%s" % (d['processor'], urllib.quote(d['URL']))
             print "Processing with %s" % purl
@@ -298,14 +324,17 @@ class PlaylistCmd(BaseCmd):
         if re.search('\d+ to .+', line):
             line, fname = line.split(' to ', 1)
         d = self._getd(line)
+        if d is None:
+            print "!! Error calling get with argument: %s" % line
+            return
         if 'URL' in d and 'name' in d:
             if fname:
                 if '/' not in fname:
-                    fname = os.path.join(DOWNLOADDIR, fname)
+                    fname = os.path.join(DOWNLOADPATH, fname)
             else:
                 fname = d['name']
                 fname = fname.rsplit("/",1)[-1].replace(" ","_") + ".avi"
-                fname = os.path.join(DOWNLOADDIR, fname)
+                fname = os.path.join(os.environ['HOME'], 'Download', fname)
             if os.path.exists(fname):
                 byterange = "Range: bytes=%s-" % (os.path.getsize(fname)+1)
             else:
@@ -325,6 +354,9 @@ class PlaylistCmd(BaseCmd):
 
     def do_play(self, line):
         d = self._getd(line)
+        if d is None:
+            print "!! Error calling play with argument: %s" % line
+            return
         res = None
         if 'processor' in d and 'URL' in d:
             res = scraper.navix_get(d['processor'], d['URL'], verbose=0)
@@ -343,13 +375,14 @@ class PlaylistCmd(BaseCmd):
                     break
             mplayer.stdin.close()
         else:
-            print "Missing some info"
+            print "Missing some info required to play"
 
     def do_reload(self, line):
         reload(scraper)
 
 if __name__ == '__main__':
-    #cache = Cache("playlist.pickle")
     pl = Playlist("http://navix.turner3d.net/playlist/index.plx")
     plc = PlaylistCmd("index", pl)
+    plc.__isindex = True
+    plc.onecmd("ls")
     plc.cmdloop()
