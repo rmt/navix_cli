@@ -1,4 +1,21 @@
 #!/usr/bin/python
+#
+# Navi-X CLI
+# Copyright (C) 2010  Robert Thomson
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
 
 import re
 import sys
@@ -48,6 +65,10 @@ class Browser(object):
         pass
 
 def navix_get(procurl, url, browser=None, _ttl=5, byterange=None, verbose=0):
+        "Use Navi-X's processors to return an open request for a url"
+        # Much of the code in this function was originally taken from the
+        # Navi-X project, which is GPLv2 licensed.
+        # See: http://code.google.com/p/navi-x/
         if not _ttl:
             print "In a loop!"
             return None
@@ -66,6 +87,8 @@ def navix_get(procurl, url, browser=None, _ttl=5, byterange=None, verbose=0):
         if not proc:
             return None
         if not proc[0].startswith("v2"):
+            # Handle the simple/old way of doing regex parsing on a URL and
+            # returning the regex matches as v1, v2, etc. to the processor.
             if verbose:
                 print "Fetching %r" % proc[0]
             if byterange is not None:
