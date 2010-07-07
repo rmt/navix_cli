@@ -211,7 +211,7 @@ def navix_get(procurl, url, browser=None, _ttl=5, byterange=None, verbose=0):
                         kwargs = {}
                         if v.get('s_cookie',''):
                             kwargs['Cookie'] = v['s_cookie']
-                        v['htmRaw'] = browser.get(v['s_url'], referer=v['s_referer'], **kwargs)
+                        v['htmRaw'] = browser.get(v['s_url'], referer=v['s_referer'], **kwargs).read()
                     elif v['s_method'] == 'post':
                         kwargs = {}
                         if v.get('s_cookie',''):
