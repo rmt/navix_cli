@@ -32,12 +32,18 @@ import textwrap
 #
 import scraper
 
-DOWNLOADPATH = os.path.join(os.environ['HOME'], 'Download')
-if not os.path.exists(DOWNLOADPATH):
-    DOWNLOADPATH = os.path.join(os.environ['HOME'], 'Downloads')
-if not os.path.exists(DOWNLOADPATH):
-    DOWNLOADPATH = os.path.join(os.environ['HOME'])
-PAGER_CMD = ["less", "-eFX"]
+try:
+    from win32com.shell import shellcon, shell
+    homedir = shell.SHGetFolderPath(0, shellcon.CSIDL_APPDATA, 0, 0)
+    PAGER_CMD = ["more"]
+except ImportError: # quick semi-nasty fallback for non-windows/win32com case
+    homedir = os.path.expanduser("~")
+    DOWNLOADPATH = os.path.join(homedir, 'Download')
+    if not os.path.exists(DOWNLOADPATH):
+        DOWNLOADPATH = os.path.join(homedir, 'Downloads')
+    if not os.path.exists(DOWNLOADPATH):
+        DOWNLOADPATH = homedir
+    PAGER_CMD = ["less", "-eFX"]
 
 exit_until_index = False # set to true in a cmd and keep returning until we're at the idx again
 
@@ -135,7 +141,7 @@ def parse_pls(url):
     d = {}
     indesc = False
     for line in fd:
-        line = line.strip()
+        line = line.strip().decode('utf-8', 'ignore')
         if indesc:
             if line.endswith("/description"):
                 indesc = False
@@ -258,7 +264,7 @@ class PlaylistCmd(BaseCmd):
             if line and not fnmatch(name, line):
                 continue
             typ = types.get(x['type'], None) or x['type']
-            pipe.stdin.write("[%-3d] (%s) %s\n" % (i, typ, name))
+            pipe.stdin.write( ("[%-3d] (%s) %s\n" % (i, typ, name)).encode('utf-8') )
         pipe.stdin.close()
         pipe.wait()
     do_ls = do_list
@@ -269,6 +275,16 @@ class PlaylistCmd(BaseCmd):
             global exit_until_index
             exit_until_index = True
             return True
+        if line.startswith("http"):
+            pl = PlaylistCmd(line, Playlist(line))
+            pl.onecmd("ls")
+            pl.cmdloop()
+            return
+        elif os.path.isfile(line):
+            line = os.path.abspath(line)
+            pl = PlaylistCmd(line, Playlist("file://"+line))
+            pl.onecmd("ls")
+            pl.cmdloop()
         d = self._getd(line)
         if d is None:
             print "!! Cannot cd to %s" % line
@@ -338,7 +354,7 @@ class PlaylistCmd(BaseCmd):
 
     def do_get(self, line):
         fname = None
-        if re.search('\d+ to .+', line):
+        if re.search('\d+ (to|as) .+', line):
             line, fname = line.split(' to ', 1)
         d = self._getd(line)
         if d is None:
@@ -351,7 +367,7 @@ class PlaylistCmd(BaseCmd):
             else:
                 fname = d['name']
                 fname = fname.rsplit("/",1)[-1].replace(" ","_") + ".avi"
-                fname = os.path.join(os.environ['HOME'], 'Download', fname)
+                fname = os.path.join(DOWNLOADPATH, fname)
             if os.path.exists(fname):
                 byterange = "Range: bytes=%s-" % (os.path.getsize(fname)+1)
             else:
