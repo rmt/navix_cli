@@ -29,21 +29,35 @@ from subprocess import Popen, PIPE
 from fnmatch import fnmatch
 from cookielib import CookieJar
 import textwrap
+import platform
 #
 import scraper
 
-try:
-    from win32com.shell import shellcon, shell
-    homedir = shell.SHGetFolderPath(0, shellcon.CSIDL_APPDATA, 0, 0)
+homedir = os.path.expanduser("~")
+DOWNLOADPATH=homedir
+for x in ('Download', 'Downloads', 'My Documents'):
+    tmppath = os.path.join(homedir, x)
+    if os.path.isdir(tmppath):
+        DOWNLOADPATH=tmppath
+        break
+if platform.system() == 'Windows':
     PAGER_CMD = ["more"]
-except ImportError: # quick semi-nasty fallback for non-windows/win32com case
-    homedir = os.path.expanduser("~")
-    DOWNLOADPATH = os.path.join(homedir, 'Download')
-    if not os.path.exists(DOWNLOADPATH):
-        DOWNLOADPATH = os.path.join(homedir, 'Downloads')
-    if not os.path.exists(DOWNLOADPATH):
-        DOWNLOADPATH = homedir
+else:
     PAGER_CMD = ["less", "-eFX"]
+
+def chdir(path, verbose=True):
+    global DOWNLOADPATH
+    tmppath = os.path.abspath(os.path.join(DOWNLOADPATH,
+            os.path.expanduser(path)))
+    if os.path.isdir(tmppath):
+        os.chdir(tmppath)
+        DOWNLOADPATH=tmppath
+        if verbose:
+            print "Download path is now %s" % tmppath
+    elif verbose:
+        print "Could not change to %s" % tmppath
+
+chdir(DOWNLOADPATH, False)
 
 exit_until_index = False # set to true in a cmd and keep returning until we're at the idx again
 
@@ -264,7 +278,8 @@ class PlaylistCmd(BaseCmd):
             if line and not fnmatch(name, line):
                 continue
             typ = types.get(x['type'], None) or x['type']
-            pipe.stdin.write( ("[%-3d] (%s) %s\n" % (i, typ, name)).encode('utf-8') )
+            out = "[%-3d] (%s) %s\n" % (i, typ, name)
+            pipe.stdin.write(out.encode('utf-8','ignore'))
         pipe.stdin.close()
         pipe.wait()
     do_ls = do_list
@@ -351,6 +366,16 @@ class PlaylistCmd(BaseCmd):
             print
         else:
             print "No processor required for", d['URL']
+
+    def do_lcd(self, line):
+        global DOWNLOADPATH
+        chdir(line)
+
+    def do_lls(self, line):
+        if platform.system() == 'Windows':
+            os.system("dir %s" % line.strip())
+        else:
+            os.system("ls %s" % line.strip())
 
     def do_get(self, line):
         fname = None
