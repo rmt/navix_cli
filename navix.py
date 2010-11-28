@@ -59,6 +59,11 @@ def chdir(path, verbose=True):
 
 chdir(DOWNLOADPATH, False)
 
+def dcode(s):
+    if type(s) == unicode:
+        return s
+    return s.decode('utf-8', 'replace')
+
 exit_until_index = False # set to true in a cmd and keep returning until we're at the idx again
 
 class myURLOpener(urllib.FancyURLopener):
@@ -155,7 +160,7 @@ def parse_pls(url):
     d = {}
     indesc = False
     for line in fd:
-        line = line.strip().decode('utf-8', 'ignore')
+        line = dcode(line.strip())
         if indesc:
             if line.endswith("/description"):
                 indesc = False
@@ -257,12 +262,12 @@ class PlaylistCmd(BaseCmd):
                 print x
             print '-'*min(len(d['name']), 70)
         if 'description' in d:
-            for l in d['description'].decode('utf-8').split('\n'):
+            for l in dcode(d['description']).split('\n'):
                 for x in textwrap.wrap(l):
                     if type(x) == unicode:
                         print x.encode('utf-8')
                     else:
-                        try: print x.decode('utf-8')
+                        try: print dcode(x)
                         except: print x.decode('iso-8859-1', 'replace')
         if 'URL' in d:
             print '[URL=%s]' % d['URL']
