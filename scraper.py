@@ -162,6 +162,7 @@ def navix_get(procurl, url, browser=None, _ttl=5, byterange=None, verbose=0):
                 print "Endless loop detected"
                 return None
 
+            inst_prev = inst
             lines = inst.splitlines()
 
             if not len(lines):
