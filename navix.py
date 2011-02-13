@@ -404,7 +404,7 @@ class PlaylistCmd(BaseCmd):
                 byterange = None
             try:
                 if 'processor' in d:
-                    res = scraper.navix_get(d['processor'], d['URL'], byterange=byterange, verbose=1)
+                    res = scraper.navix_get(d['processor'], d['URL'], byterange=byterange, verbose=0)
                 else:
                     if byterange:
                         res = get(d['URL'], Range=byterange)
