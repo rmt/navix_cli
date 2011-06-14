@@ -347,7 +347,7 @@ def navix_get(procurl, url, browser=None, _ttl=5, byterange=None, verbose=0):
                             p = re.compile(v['regex'])
                             match = p.search(v[arg])
                             if match:
-                                for i in xrange(1, len(match.group())+1):
+                                for i in xrange(1, len(match.groups())+1):
                                     v['v%d'%i] = match.group(i)
                             else:
                                 v['nomatch'] = 1

@@ -35,7 +35,7 @@ import scraper
 
 homedir = os.path.expanduser("~")
 DOWNLOADPATH=homedir
-for x in ('Download', 'Downloads', 'My Documents'):
+for x in ('Downloads', 'Download', 'My Documents'):
     tmppath = os.path.join(homedir, x)
     if os.path.isdir(tmppath):
         DOWNLOADPATH=tmppath
@@ -82,25 +82,17 @@ def request(url, referer=None, ua=USER_AGENT, data=None, **kwargs):
     d.update(kwargs)
     r = urllib2.Request(url, data, d)
     return r
-def get(url, *args, **kwargs):
-    req = request(url, *args, **kwargs)
-    cookiejar.add_cookie_header(req)
-    print "Requesting %r" % url
-    #res = urllib2.urlopen(req)
-    res = myUrlClass.open(req)
-    cookiejar.extract_cookies(res, req)
-    return res
-def get_match(regex, content, num=1):
-    m = re.search(regex, content, re.I)
-    try:
-        return m.group(num)
-    except:
-        return None
+
+def ratestring(kbps):
+    if kbps > 1024:
+        return "%0.2f MB/s" % (kbps/1024)
+    return "%d KB/s" % (kbps)
 
 def download(res, filename):
     length = res.info().get('Content-Length', None)
     strlength = length and ("%dk" % (int(length)/1024)) or "Unknown"
     i = 0
+    starttime = time.time()
     data = res.read(4096)
     count = len(data)
     out = None
@@ -120,7 +112,8 @@ def download(res, filename):
         out.write(data)
         data = res.read(4096)
         count += len(data)
-        sys.stdout.write("\r\033[K[%dk / %s]" % (count//1024, strlength))
+        kbps = int(count / (int(time.time() - starttime) or 1) / 1024.0)
+        sys.stdout.write("\r\033[K[%dk / %s] (~%s)" % (count//1024, strlength, ratestring(kbps)))
         sys.stdout.flush()
     out.close()
     print ""
@@ -406,14 +399,19 @@ class PlaylistCmd(BaseCmd):
                 if 'processor' in d:
                     res = scraper.navix_get(d['processor'], d['URL'], byterange=byterange, verbose=0)
                 else:
+                    browser = scraper.Browser()
                     if byterange:
-                        res = get(d['URL'], Range=byterange)
+                        res = browser.get(d['URL'], Range=byterange)
                     else:
-                        res = get(d['URL'])
+                        res = browser.get(d['URL'])
                 download(res, fname)
             except:
                 import traceback
                 traceback.print_exc()
+
+    def do_getall(self, line):
+        for x in line.split(";"):
+            self.do_get(x)
 
     def do_play(self, line):
         d = self._getd(line)
