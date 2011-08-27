@@ -383,6 +383,7 @@ def navix_get(procurl, url, browser=None, _ttl=5, byterange=None, verbose=0):
                 kwargs['Cookie'] = v['s_cookie']
             if byterange is not None:
                 kwargs['Range'] = byterange
-            print "URL: %s" % v.get('url','')
+            if verbose:
+                print "URL: %s" % v.get('url','')
             if v.get('url',''):
                 return browser.get(v['url'], **kwargs)
