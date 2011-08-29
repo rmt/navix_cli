@@ -474,6 +474,8 @@ class PlaylistCmd(BaseCmd):
                 fname = fname.rsplit("/",1)[-1].replace(" ","_") + ".EXT"
                 fname = re.sub(r"&amp;|[;:()\/&\[\]*%#@!?]", "_", fname)
                 fname = re.sub(r"__+","_", fname)
+                fname = re.sub(r"\.\.+",".", fname)
+                fname = fname.replace("_.", ".")
                 fname = os.path.join(DOWNLOADPATH, fname)
             if os.path.exists(fname):
                 byterange = "Range: bytes=%s-" % (os.path.getsize(fname)+1)
