@@ -2,17 +2,17 @@
 #
 # Navi-X CLI
 # Copyright (C) 2010  Robert Thomson
-# 
+#
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -23,6 +23,7 @@ import cmd
 import cPickle as pickle
 import os.path
 import time
+import logging
 import urllib, urllib2
 from pprint import pprint, pformat
 from subprocess import Popen, PIPE
@@ -31,8 +32,10 @@ import textwrap
 import platform
 import mimetypes
 import traceback
+import cookielib
 #
-import scraper # the navi-x NIPL parser
+from navix_lib import do_request, make_request
+import navix_lib
 
 # globals
 PLSEARCHPATH = ['./navix.plx', '~/.navix.plx', '/etc/navix/playlist']
@@ -43,6 +46,7 @@ else:
 DOWNLOADPATH=os.path.abspath('.') # current dir
 exit_until_index = False # set to true in a cmd and keep returning until we're at the idx again
 homedir = os.path.expanduser("~")
+
 
 def chdir(path, verbose=True):
     "Change the download directory"
@@ -84,6 +88,12 @@ def ratestring(kbps):
         return "%0.2f MB/s" % (kbps/1024)
     return "%d KB/s" % (kbps)
 
+def guess_extension_from_url(url):
+    m = re.search(r"\.(?P<ext>avi|flv|mpg|mp4|mpeg|ogv|mp3|flac|ogg)([?&]|$)", url, re.I)
+    if m:
+        return m.group('ext').lower()
+    return None
+
 def guess_extension(response):
     "Return an extension based on the Content-Type header in the response"
     if not response:
@@ -99,6 +109,7 @@ def guess_extension(response):
         if mimetype:
             ext = mimetypes.guess_extension(mimetype)
         return ext
+    return None
 
 def download(res, filename):
     """Download the HTTP response object to the given filename
@@ -214,8 +225,8 @@ class Item(dict):
         return self.get('URL', None)
 
     @property
-    def proc(self):
-        return self.get('proc', None)
+    def processor(self):
+        return self.get('processor', None)
 
     @property
     def infotag(self):
@@ -262,7 +273,7 @@ class BaseCmd(cmd.Cmd):
     def emptyline(self):
         "Newlines aren't error conditions"
         pass
-    
+
     def default(self, line):
         if line.startswith('!'):
             os.system(line[1:])
@@ -458,9 +469,9 @@ class PlaylistCmd(BaseCmd):
             os.system("ls %s" % line.strip())
 
     def do_get(self, line):
-        "get <num> [to/as <filename>]: download the specified item"
+        "get <num> [to <filename>]: download the specified item"
         fname = None
-        if re.search('\d+ (to|as) .+', line):
+        if re.search('\d+ to .+', line):
             line, fname = line.split(' to ', 1)
         d = self._getd(line)
         if d is None:
@@ -472,35 +483,44 @@ class PlaylistCmd(BaseCmd):
                     fname = os.path.abspath(os.path.join(DOWNLOADPATH, fname))
             else:
                 fname = d['name']
+                # add extension (.EXT will get it from the Content-Type later)
+                ext = guess_extension_from_url(d['URL']) or "EXT"
+                fname = fname + "." + ext
                 # cleanup filename
-                fname = fname.rsplit("/",1)[-1].replace(" ","_") + ".EXT"
+                fname = fname.rsplit("/",1)[-1].replace(" ","_")
                 fname = re.sub(r"&amp;|[;:()\/&\[\]*%#@!?]", "_", fname)
                 fname = re.sub(r"__+","_", fname)
                 fname = re.sub(r"\.\.+",".", fname)
                 fname = fname.replace("_.", ".")
                 fname = os.path.join(DOWNLOADPATH, fname)
-            if os.path.exists(fname):
-                byterange = "Range: bytes=%s-" % (os.path.getsize(fname)+1)
-            else:
-                byterange = None
+
+            # evaluate NIPL processor
             try:
-                if 'processor' in d:
-                    res = scraper.navix_get(d['processor'], d['URL'], byterange=byterange, verbose=0)
-                else:
-                    browser = scraper.Browser()
-                    if byterange:
-                        res = browser.get(d['URL'], Range=byterange)
-                    else:
-                        res = browser.get(d['URL'])
-                if not res:
-                    print "Could not download %s" % (d)
-                # guess extension
-                if fname.endswith(".EXT"):
-                    ext = guess_extension(res)
-                    if ext:
-                        fname = fname[:-4] + ext
-                # download the sucker
-                print "Downloading %s" % (res.geturl())
+                request = make_request(d['URL'], d.get('processor', None))
+            except:
+                traceback.print_exc()
+                return
+
+            if not request:
+                print "Could not download %s" % (d['URL'])
+                return
+            try:
+                res = urllib2.urlopen(request)
+            except:
+                traceback.print_exc()
+                res = None
+            if not res:
+                print "Could not download %s" % (d)
+                return
+
+            # guess filename extension if pending
+            if fname.endswith(".EXT"):
+                ext = guess_extension(res)
+                if ext:
+                    fname = fname[:-4] + ext
+            # download the sucker
+            print "Downloading %s" % (res.geturl())
+            try:
                 download(res, fname)
             except:
                 traceback.print_exc()
@@ -518,7 +538,8 @@ class PlaylistCmd(BaseCmd):
             print "Usage: geturl filename;url;processor"
             return
         try:
-            res = scraper.navix_get(proc.strip(), url.strip(), verbose=0)
+            request = make_request(url.strip(), proc.strip())
+            res = urllib2.urlopen(request)
             download(res, filename.strip())
         except:
             traceback.print_exc()
@@ -532,11 +553,9 @@ class PlaylistCmd(BaseCmd):
         if d is None:
             print "!! Error calling play with argument: %s" % line
             return
-        res = None
-        if 'processor' in d and 'URL' in d:
-            res = scraper.navix_get(d['processor'], d['URL'], verbose=0)
-        elif 'URL' in d:
-            res = urllib.urlopen(request(d['URL']))
+        #
+        request = make_request(d['URL'], d.get('processor',None))
+        res = urllib2.urlopen(request)
         if res:
             mplayer = Popen(['mplayer', '-cache-min', '5', '-noconsolecontrols', '-cache', '2048', '/dev/stdin'], stdin=PIPE)
             while True:
@@ -551,10 +570,6 @@ class PlaylistCmd(BaseCmd):
             mplayer.stdin.close()
         else:
             print "Missing some info required to play"
-
-    # nice for developing scraper.py
-    def do_reload_scraper(self, line):
-        reload(scraper)
 # PlaylistCmd
 
 
@@ -596,4 +611,6 @@ def main(args):
     plc.cmdloop()
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    #navix_lib.DEBUGLEVEL = 20
     main(sys.argv)

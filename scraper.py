@@ -2,17 +2,17 @@
 #
 # Navi-X CLI
 # Copyright (C) 2010  Robert Thomson
-# 
+#
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
@@ -42,18 +42,14 @@ class Browser(object):
         self.cookiejar = cookielib.CookieJar()
         self.headers = headers or {}
         self.refpolicy = 0
-    def make_request(self, url, referer=None, ua=USER_AGENT, data=None,
-                     cookies=None, **kwargs):
-        d = { "User-Agent" : self.user_agent }
+    def make_request(self, url, referer=None, ua=None, data=None, **kwargs):
+        d = { "User-Agent" : ua or self.user_agent }
         d.update(self.headers)
         if referer:
             d['Referer'] = referer
-        d.update(kwargs)
         r = urllib2.Request(url, data, d)
-        #if type(cookies) == dict:
-        #    c = Cookie()
-        #    for k,v in cookies.items():
         self.cookiejar.add_cookie_header(r)
+        d.update(kwargs)
         return r
     def get(self, url, *args, **kwargs):
         req = self.make_request(url, *args, **kwargs)
@@ -61,8 +57,34 @@ class Browser(object):
         #print "Requested %s" % url
         self.cookiejar.extract_cookies(res, req)
         return res
-    def add_cookie(cookie):
+    def add_cookie(self, cookie):
         pass
+    def cookie_iter(self):
+        for cookie in self.cookiejar:
+            yield (cookie.name, cookie.value)
+
+def getRemote(url, scrape_args, browser=None):
+    if not browser:
+        b = Browser()
+
+    has = scrape_args.has_key
+    get = scrape_args.get
+    d = {}
+    if has('referer'):
+        d['referer'] = get('referer')
+    if has('cookie'):
+        d['Cookie'] = get('cookie')
+    if has('agent'):
+        d['ua'] = get('agent')
+    #if has('method'):
+    #    
+    #if has('action'):
+    #
+    if has('postdata'):
+        d['data'] = get('postdata')
+    if has('headers'):
+        d.update(get('headers'))
+    b.get(**d)
 
 def navix_get(procurl, url, browser=None, _ttl=5, byterange=None, verbose=0):
         "Use Navi-X's processors to return an open request for a url"
@@ -139,6 +161,9 @@ def navix_get(procurl, url, browser=None, _ttl=5, byterange=None, verbose=0):
         lparse=re.compile('^([^ =]+)([ =])(.+)$')
         # condition parser
         ifparse=re.compile('^([^<>=!]+)\s*([!<>=]+)\s*(.+)$');
+        # dot property parser
+        dotvarparse=re.compile('^(nookies|s_headers)\.(.+)$');
+        #
         while exflag == False:
             scrape = 1
             phase = phase + 1
@@ -213,6 +238,9 @@ def navix_get(procurl, url, browser=None, _ttl=5, byterange=None, verbose=0):
                         if v.get('s_cookie',''):
                             kwargs['Cookie'] = v['s_cookie']
                         v['htmRaw'] = browser.get(v['s_url'], referer=v['s_referer'], **kwargs).read()
+                        for cookiename,cookieval in browser.cookie_iter():
+                            print "Setting cookies.%s to %s" % (cookiename, cookieval)
+                            v['cookies.%s' % cookiename] = cookieval
                     elif v['s_method'] == 'post':
                         kwargs = {}
                         if v.get('s_cookie',''):
@@ -222,6 +250,8 @@ def navix_get(procurl, url, browser=None, _ttl=5, byterange=None, verbose=0):
                             v['htmRaw'] = res.read()
                         elif v['s_action'] == 'geturl':
                             v['v1'] = res.geturl()
+                        for cookiename,cookieval in browser.cookie_iter():
+                            v['cookies.%s' % cookiename] = cookieval
                         res.close()
                     if v['s_action'] == 'read' and v['regex'] > '':
                         v['nomatch'] = ''
