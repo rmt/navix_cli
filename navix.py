@@ -86,6 +86,8 @@ def ratestring(kbps):
 
 def guess_extension(response):
     "Return an extension based on the Content-Type header in the response"
+    if not response:
+        return None
     ct = response.info().get('content-type')
     if ct:
         mimetype = ct.split(';')[0]
