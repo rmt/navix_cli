@@ -497,8 +497,9 @@ class NIPLParser:
              setting variables,
              and calling commands.
         """
-        iftrue = True
-        in_if = False
+        iftrue = True # in a running if block?
+        if_was_true = False # evaluate else or future elseifs?
+        in_if = False # currently in an if/elseif/else/endif block
         for line in prociter:
             line = line.lstrip().rstrip("\r\n")
             self.debug("proc input ::: %s" % (line,))
@@ -509,17 +510,21 @@ class NIPLParser:
 
             # handle conditionals
             if in_if:
+                if line == "if":
+                    raise NIPLException("Nested if clauses are not supported")
                 if line == "endif":
                     in_if = False
-                    iftrue = True
+                    if_was_true = False
                     continue
                 elif line == "else":
                     in_if = True
-                    iftrue = not iftrue
+                    iftrue = not if_was_true
                     continue
                 elif line.startswith("elseif "):
                     in_if = True
-                    iftrue = self.evalexpr(line[7:].lstrip())
+                    if not if_was_true:
+                        iftrue = self.evalexpr(line[7:].lstrip())
+                        if_was_true = iftrue
                     continue
                 elif not iftrue:
                     # skip to next line

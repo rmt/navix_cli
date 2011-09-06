@@ -121,6 +121,24 @@ class TestNIPL(unittest.TestCase):
     def test_proc_v2_redirect(self):
         "TODO"
 
+    def test_proc_v2_if_true(self):
+        "TODO - ensure if evaluated"
+
+    def test_proc_v2_if_false(self):
+        "TODO - ensure if evaluated"
+
+    def test_proc_v2_if_true_else(self):
+        "TODO - ensure only true code was evaluated"
+
+    def test_proc_v2_if_else_true(self):
+        "TODO - ensure only else code was evaluate"
+
+    def test_proc_v2_if_elseif_all_false(self):
+        "TODO - ensure nothing was evaluated"
+
+    def test_proc_v2_if_elseif_true_else(self):
+        "TODO - ensure only elseif code was evaluated"
+
 if __name__ == '__main__':
     unittest.main()
 
