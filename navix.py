@@ -30,23 +30,21 @@ from subprocess import Popen, PIPE
 from fnmatch import fnmatch
 import textwrap
 import platform
-import mimetypes
 import traceback
 import cookielib
 #
-from navix_lib import do_request, make_request
+from navix_lib import do_request, make_request, download, Pager
 import navix_lib
 
 # globals
 PLSEARCHPATH = ['./navix.plx', '~/.navix.plx', '/etc/navix/playlist']
 if platform.system() == 'Windows':
-    PAGER_CMD = ["more"]
+    PAGER_CMD = None
 else:
     PAGER_CMD = ["less", "-eFX"]
 DOWNLOADPATH=os.path.abspath('.') # current dir
 exit_until_index = False # set to true in a cmd and keep returning until we're at the idx again
 homedir = os.path.expanduser("~")
-
 
 def chdir(path, verbose=True):
     "Change the download directory"
@@ -62,87 +60,14 @@ def chdir(path, verbose=True):
         print "Could not change to %s" % tmppath
 
 def dcode(s):
+    "Try to return a Unicode string"
     if type(s) == unicode:
         return s
-    return s.decode('utf-8', 'replace')
-
-class myURLOpener(urllib.FancyURLopener):
-    def http_error_206(self, url, fp, errcode, errmsg, headers, data=None):
-        pass
-myUrlClass = myURLOpener()
-
-USER_AGENT="Mozilla/5.0 (Windows; U; Windows NT 6.1; ru; rv:1.9.2b5) Gecko/20091204 Firefox/3.6b5"
-
-def request(url, referer=None, ua=USER_AGENT, data=None, **kwargs):
-    "Make a request instance, setting User-Agent & referer if given"
-    d = { "User-Agent" : ua }
-    if referer:
-        d['Referer'] = referer
-    d.update(kwargs)
-    r = urllib2.Request(url, data, d)
-    return r
-
-def ratestring(kbps):
-    "Return the download rate in a human-friendly format."
-    if kbps > 1024:
-        return "%0.2f MB/s" % (kbps/1024)
-    return "%d KB/s" % (kbps)
-
-def guess_extension_from_url(url):
-    m = re.search(r"\.(?P<ext>avi|flv|mpg|mp4|mpeg|ogv|mp3|flac|ogg)([?&]|$)", url, re.I)
-    if m:
-        return m.group('ext').lower()
-    return None
-
-def guess_extension(response):
-    "Return an extension based on the Content-Type header in the response"
-    if not response:
-        return None
-    ct = response.info().get('content-type')
-    if ct:
-        mimetype = ct.split(';')[0]
-        ext = mimetypes.guess_extension(mimetype)
-        if ext:
-            return ext
-        # otherwise try based on URL
-        mimetype, _ = mimetypes.guess_type(response.geturl())
-        if mimetype:
-            ext = mimetypes.guess_extension(mimetype)
-        return ext
-    return None
-
-def download(res, filename):
-    """Download the HTTP response object to the given filename
-    using VT100 codes to interactively show the progress"""
-    length = res.info().get('Content-Length', None)
-    strlength = length and ("%dk" % (int(length)/1024)) or "Unknown"
-    i = 0 # if the destination file exists, add .$i to it
-    starttime = time.time() # for rate calculation
-    buf = res.read(4096) # 4k block size
-    bytecount = len(buf)
-    out = None
-    while buf:
-        if out is None:
-            fname = filename
-            i = 1
-            if res.getcode() == 206: # partial file transfer
-                # TODO / FIXME - seek to right location, in-case
-                out = file(fname, "ab")
-            else:
-                while os.path.exists(fname):
-                    fname = "%s.%d" % (fname, i)
-                    i = i + 1
-                out = file(fname, "wb")
-            print "Downloading to %s" % fname
-        out.write(buf)
-        buf = res.read(4096)
-        bytecount += len(buf)
-        kbps = int(bytecount / (int(time.time() - starttime) or 1) / 1024.0)
-        sys.stdout.write("\r\033[K[%dk / %s] (~%s)" % (bytecount//1024, strlength, ratestring(kbps)))
-        sys.stdout.flush()
-    out.close()
-    print ""
-# download
+    try:
+        return s.decode('utf-8')
+    except:
+        try: return s.decode('iso-8859-1')
+        except: return s.decode('utf-8', 'replace')
 
 def parse_navix_pls(url):
     """Parse a navi-x format playlist entries, ignoring any type-less entries
@@ -236,15 +161,12 @@ class Item(dict):
 class Playlist(list):
     def __init__(self, url):
         self.url = url
-        self.d = d = {}
         try:
             gen = parse_navix_pls(url)
         except urllib2.HTTPError:
             return
         for x in gen:
             item = Item(x)
-            if item.url:
-                d[item.url] = item
             self.append(item)
 # Playlist
 
@@ -351,7 +273,7 @@ class PlaylistCmd(BaseCmd):
         line = line.strip()
         i = -1
         typealiases = { 'playlist' : 'pls', }
-        pipe = Popen(PAGER_CMD, stdin=PIPE)
+        pager = Pager(PAGER_CMD)
         for item in self.playlist:
             i += 1
             name = re.sub('\[\/?COLOR.*?\]','', item['name'])
@@ -361,9 +283,8 @@ class PlaylistCmd(BaseCmd):
             if item.infotag:
                 name = "%s [%s]" % (name, item.infotag)
             out = "[%3d] (%s) %s\n" % (i, typ, name)
-            pipe.stdin.write(out.encode('utf-8','ignore'))
-        pipe.stdin.close()
-        pipe.wait()
+            pager.write(out.encode('utf-8','ignore'))
+        pager.close()
 
     def do_cd(self, line):
         "cd <num> | cd .. | cd /: change to the given playlist, up one level, or back to the main index"
@@ -408,19 +329,19 @@ class PlaylistCmd(BaseCmd):
             if item.type in ('video', 'audio'):
                 print "!! Cannot view binary data as a text file"
                 return
-            req = request(item.url)
+            req = urllib2.Request(item.url,
+                headers={ "User-Agent":nipl.HTTP_USER_AGENT})
             g = urllib2.urlopen(req)
-            pipe = Popen(PAGER_CMD, stdin=PIPE)
+            pager = Pager(PAGER_CMD)
             while True:
                 b = g.read(512)
                 if not b:
                     break
                 try:
-                    pipe.stdin.write(b)
+                    pager.write(b)
                 except IOError:
                     break
-            pipe.stdin.close()
-            pipe.wait()
+            pager.close()
             print ""
 
     def do_search(self, line):
@@ -484,13 +405,14 @@ class PlaylistCmd(BaseCmd):
             else:
                 fname = d['name']
                 # add extension (.EXT will get it from the Content-Type later)
-                ext = guess_extension_from_url(d['URL']) or "EXT"
-                fname = fname + "." + ext
+                ext = navix_lib.guess_extension_from_url(d['URL']) or ".EXT"
+                fname = fname + ext
                 # cleanup filename
                 fname = fname.rsplit("/",1)[-1].replace(" ","_")
                 fname = re.sub(r"&amp;|[;:()\/&\[\]*%#@!?]", "_", fname)
                 fname = re.sub(r"__+","_", fname)
                 fname = re.sub(r"\.\.+",".", fname)
+                fname = re.sub(r"^[._]+", "", fname)
                 fname = fname.replace("_.", ".")
                 fname = os.path.join(DOWNLOADPATH, fname)
 
@@ -515,7 +437,10 @@ class PlaylistCmd(BaseCmd):
 
             # guess filename extension if pending
             if fname.endswith(".EXT"):
-                ext = guess_extension(res)
+                ext = navix_lib.guess_extension_from_response(res)
+                if ext in (".obj", ".ksh",".EXT"):
+                    # fallback to something more probable
+                    ext = ".AVI" # in caps so we know we couldn't get it
                 if ext:
                     fname = fname[:-4] + ext
             # download the sucker

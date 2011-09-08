@@ -1,13 +1,123 @@
 #
 # A library of helper classes and methods for Navi-X CLI
 #
-import urllib2
-import nipl
+import mimetypes
 import logging
+import os.path
+import urllib2
+import urllib
+import time
+import nipl
+import sys
+import re
 
 DEBUGLEVEL=0
 
+class Pager(object):
+    "A piped Pager class, falling back to straight stdout"
+    def __init__(self, cmd=None):
+        "eg. Pager(['less', '-eFX'])"
+        self.pipe = None
+        if cmd:
+            try:
+                self.pipe = Popen(cmd, stdin=PIPE)
+            except:
+                pass
+    def write(self, buf):
+        "Write buf to pager"
+        if self.pipe:
+            self.pipe.stdin.write(buf)
+        else:
+            sys.stdout.write(buf)
+    def close(self):
+        "When finished, call pager.close()"
+        if self.pipe:
+            self.pipe.stdin.close()
+            self.pipe.wait()
+
+def guess_extension_from_url(url):
+    """
+    Given a URL, try to work out the file extension
+    """
+    m = re.search(r"\.(?P<ext>avi|flv|mpg|mp4|mpeg|ogv|mp3|flac|ogg|mkv)([?&]|$)", url, re.I)
+    if m:
+        return "."+m.group('ext').lower()
+    # otherwise try mimetypes.guess_type
+    url = urllib.splitquery(url)[0] # split query from end
+    mimetype, _ = mimetypes.guess_type(url)
+    if mimetype:
+        ext = mimetypes.guess_extension(mimetype)
+        if ext:
+            return ext
+    return None
+
+
+def guess_extension_from_response(response):
+    """
+    Given a response object, try to work out the file extension based
+    firstly on the URL, and then on the Content-Type
+    """
+    if not response:
+        return None
+    # try from request URL
+    ext = guess_extension_from_url(response.geturl())
+    if ext:
+        return ext
+    # try from content type
+    ct = response.info().get('content-type')
+    if ct:
+        mimetype = ct.split(';')[0]
+        ext = mimetypes.guess_extension(mimetype)
+        if ext:
+            return ext
+    return None
+
+
+def ratestring(kbps):
+    "Return the download rate in a human-friendly format."
+    if kbps > 1024:
+        return "%0.2f MB/s" % (kbps/1024)
+    return "%d KB/s" % (kbps)
+
+
+def download(res, filename, stdout=sys.stdout):
+    """Download the HTTP response object to the given filename
+    using VT100 codes to interactively show the progress"""
+    length = res.info().get('Content-Length', None)
+    strlength = length and ("%dk" % (int(length)/1024)) or "Unknown"
+    i = 0 # if the destination file exists, add .$i to it
+    starttime = time.time() # for rate calculation
+    chunksize = 4096
+    buf = res.read(chunksize)
+    bytecount = len(buf)
+    out = None
+    while buf:
+        if out is None:
+            fname = filename
+            i = 1
+            if res.getcode() == 206: # partial file transfer
+                # TODO / FIXME - seek to right location, in-case
+                out = file(fname, "ab")
+            else:
+                while os.path.exists(fname):
+                    fname = "%s.%d" % (fname, i)
+                    i = i + 1
+                out = file(fname, "wb")
+            print >>stdout, "Downloading to %s" % fname
+        out.write(buf)
+        buf = res.read(chunksize)
+        bytecount += len(buf)
+        kbps = int(bytecount / (int(time.time() - starttime) or 1) / 1024.0)
+        if chunksize == 4096 and kbps > 409600 and bytecount > 1048576:
+            chunksize = 8192
+        stdout.write("\r\033[K[%dk / %s] (~%s)" % (bytecount//1024, strlength, ratestring(kbps)))
+        stdout.flush()
+    out.close()
+    print >>stdout, ""
+
+
 class Nookie(object):
+    "A Nookie is a NIPL cookie"
     def __init__(self, name, value, expiry=None):
         self.name = name
         self.value = value
@@ -102,12 +212,12 @@ def getRemote(url, paramargs=None):
     return oret
 
 
-def make_request(url, processor=None):
-    "Given an Item instance, return an open Request, or None"
-    if processor:
+def make_request(url, processor_url=None):
+    "Given a URL & process URL, return an open Request, or None"
+    if processor_url:
         parser = nipl.NIPLParser(
             url=url,
-            proc=processor,
+            proc=processor_url,
             getRemote=getRemote,
             nookiestore=NookieStore(),
             logger=logging,
@@ -122,11 +232,14 @@ def make_request(url, processor=None):
     request.add_header('User-Agent', nipl.HTTP_USER_AGENT)
     return request
 
-def do_request(url, processor=None):
-    request = make_request(url, processor)
+
+def do_request(url, processor_url=None):
+    "Call make_request & then call urllib2.urlopen, returning response"
+    request = make_request(url, processor_url)
     try:
         if request:
             return urllib2.urlopen(request)
     except urllib2.HTTPError, e:
         print e
     return None
+
